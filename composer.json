@@ -1,0 +1,55 @@
+{
+  "name": "greenimp/laravel-pdf-manager",
+  "description": "Laravel library for building, merging, filling, and stamping PDFs.",
+  "keywords": [
+    "pdf",
+    "laravel",
+    "dompdf",
+    "setasign"
+  ],
+  "homepage": "https://github.com/GreenImp/laravel-pdf-manager",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Lee Langley-Rees",
+      "email": "lee@greenimp.co.uk"
+    }
+  ],
+  "repositories": [
+    {
+      "type": "composer",
+      "url": "https://www.setasign.com/downloads/"
+    }
+  ],
+  "require": {
+    "php": "^7.1.3",
+    "bensampo/laravel-enum": "^1.37",
+    "setasign/setapdf-formfiller_full": "2.32.0.1371",
+    "setasign/setapdf-merger": "2.32.0.1371",
+    "setasign/setapdf-stamper": "2.32.0.1371"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^8.0 || ^9.0"
+  },
+  "extra": {
+    "laravel": {
+      "providers": [
+        "GreenImp\\PdfManager\\PdfManagerServiceProvider"
+      ]
+    }
+  },
+  "autoload": {
+    "psr-4": {
+      "GreenImp\\PdfManager\\": "src"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "GreenImp\\PdfManager\\Tests\\": "tests"
+    }
+  },
+  "scripts": {
+    "test": "vendor/bin/phpunit",
+    "test-coverage": "vendor/bin/phpunit --coverage-html=build"
+  }
+}
