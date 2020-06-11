@@ -3,6 +3,8 @@
 namespace GreenImp\PdfManager\Stamps;
 
 use GreenImp\PdfManager\Enums\PagePositionEnum;
+use App\Libraries\PdfManager\Enums\Pages;
+use App\Libraries\PdfManager\PageNumber;
 use InvalidArgumentException;
 use SetaPDF_Core_Document;
 use SetaPDF_Stamper_Stamp;
@@ -24,6 +26,17 @@ class PdfStamp extends Stampable
     /** @var float|null $width The width to stamp the PDF as */
     protected $width = null;
 
+    /**
+     * PdfStamp constructor.
+     *
+     * @param  string|null  $path [optional] path to the pdf to stamp with
+     * @param  PagePositionEnum|null  $position
+     * @param  PageNumber|Pages|array|null $pages
+     *
+     * @throws \BenSampo\Enum\Exceptions\InvalidEnumMemberException
+     *
+     * @todo this wont work if stamp path is on a cloud disk (e.g. s3)
+     */
     public function __construct(?string $path = null, ?PagePositionEnum $position = null, $pages = null)
     {
         parent::__construct($position, $pages);
@@ -32,7 +45,11 @@ class PdfStamp extends Stampable
     }
 
     /**
-     * {@inheritdoc}
+     * Returns the stamp object.
+     *
+     * @param SetaPDF_Core_Document $document
+     *
+     * @return SetaPDF_Stamper_Stamp
      */
     protected function getStamp(SetaPDF_Core_Document $document): SetaPDF_Stamper_Stamp
     {

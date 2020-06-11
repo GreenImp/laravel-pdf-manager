@@ -4,6 +4,7 @@ namespace GreenImp\PdfManager;
 
 use GreenImp\PdfManager\Enums\FieldModifierEnum;
 use GreenImp\PdfManager\Exceptions\FileMergeException;
+use GreenImp\PdfManager\Exceptions\FileReadException;
 use GreenImp\PdfManager\Exceptions\FileSaveException;
 use GreenImp\PdfManager\Exceptions\InvalidFieldException;
 use GreenImp\PdfManager\Exceptions\InvalidFileException;
@@ -20,6 +21,7 @@ use InvalidArgumentException;
 use SetaPDF_Core_Document;
 use SetaPDF_Core_Exception;
 use SetaPDF_Core_Parser_CrossReferenceTable_Exception;
+use SetaPDF_Core_Reader_Exception;
 use SetaPDF_Core_Writer_String;
 use SetaPDF_FormFiller;
 use SetaPDF_FormFiller_Exception;
@@ -142,7 +144,7 @@ class PdfManager
      * Returns $this for chainability.
      *
      * @param  string  $filePath
-     * @param  float|null  $order  [optional]. The order / position that the file should be rendered at
+     * @param  float|null  $order  [optional] The order / position that the file should be rendered at
      *
      * @return $this
      *
@@ -196,8 +198,8 @@ class PdfManager
      *
      * @param  string  $viewName
      * @param  array|null  $data  [optional] data to pass to the blade view
-     * @param  string|null  $fileName  [optional]. Use to specify a particular filename
-     * @param  float|null  $order  [optional]. The order / position that the file should be rendered at
+     * @param  string|null  $fileName  [optional] Use to specify a particular filename
+     * @param  float|null  $order  [optional] The order / position that the file should be rendered at
      *
      * @return string
      *
@@ -225,7 +227,7 @@ class PdfManager
      * data, page numbers etc that have ben set on the object.
      *
      * @param  string  $fileName  The filename to save the PDF as (Can include a relative path)
-     * @param  bool  $ignoreMissingFields  [optional]. Whether to ignore missing form fields instead of throwing an error
+     * @param  bool  $ignoreMissingFields  [optional] Whether to ignore missing form fields instead of throwing an error
      *
      * @return string
      *
@@ -299,7 +301,7 @@ class PdfManager
      * @param  string  $fileName  The filename to save the PDF as (Can include a relative path)
      * @param  array|null  $data  [optional] form field data to populate the PDF with
      * @param  PageNumbers  $pageNumbers  [optional] object to add page numbers to the document
-     * @param  bool  $ignoreMissingFields  [optional]. Whether to ignore missing form fields instead of throwing an error
+     * @param  bool  $ignoreMissingFields  [optional] Whether to ignore missing form fields instead of throwing an error
      *
      * @return string
      *
@@ -334,11 +336,12 @@ class PdfManager
      *
      * @param  string  $viewName
      * @param  array|null  $data  [optional] data to pass to the blade view
-     * @param  string|null  $fileName  [optional]. Use to specify a particular filename
+     * @param  string|null  $fileName  [optional] Use to specify a particular filename
      *
      * @return string
      *
      * @throws FileNotFoundException
+     * @throws FileSaveException
      */
     public function buildView(string $viewName, ?array $data = null, ?string $fileName = null): string
     {
@@ -362,12 +365,20 @@ class PdfManager
             throw new FileNotFoundException('Storage directory not found and cannot be created: ' . self::STORAGE_PATH);
         }
 
-        // save the PDF
-        $pdf
-            // ensure it's A4
-            ->setPaper('a4', 'portrait')
-            // save it
-            ->save($this->fileSystem->path($outputPath));
+        // set the page size
+        $pdf->setPaper('a4', 'portrait');
+
+        /**
+         * DomPDF `save()` method can`t handle non-local disks (e.g. s3)
+         * so we need to get the file contents and save it manually
+         */
+        // get the file contents
+        $contents = $pdf->output();
+
+        // store the file
+        if (!$this->fileSystem->put($outputPath, $contents)) {
+            throw new FileSaveException($outputPath);
+        }
 
         // return the relative output path
         return $outputPath;
@@ -380,7 +391,7 @@ class PdfManager
      *
      * @param  SetaPDF_Core_Document  $document
      * @param  array  $data
-     * @param  bool  $ignoreMissing  [optional]. Whether to ignore missing fields instead of throwing an error
+     * @param  bool  $ignoreMissing  [optional] Whether to ignore missing fields instead of throwing an error
      *
      * @return SetaPDF_Core_Document
      *
@@ -407,7 +418,7 @@ class PdfManager
             } catch (SetaPDF_FormFiller_Exception $e) {
                 // only throw the exception if we want to
                 if (!$ignoreMissing) {
-                    throw new InvalidFieldException($key);
+                    throw new InvalidFieldException($key, $e);
                 }
             }
         }
@@ -489,6 +500,7 @@ class PdfManager
      * @return SetaPDF_Core_Document
      *
      * @throws FileNotFoundException
+     * @throws FileReadException
      * @throws InvalidMimeTypeException
      * @throws InvalidFileException
      */
@@ -501,9 +513,14 @@ class PdfManager
 
         // load the document and return it
         try {
-            return SetaPDF_Core_Document::loadByFilename($this->fileSystem->path($filePath), $writer);
+            // load the document contents and return it
+            // we can't load by path here, with `SetaPDF_Core_Document::loadByFilename()`,
+            // because SetaSign can't load from cloud disks (e.g. s3)
+            return SetaPDF_Core_Document::loadByString($this->fileSystem->get($filePath), $writer);
+        } catch (SetaPDF_Core_Reader_Exception $e) {
+            throw new FileReadException($filePath, $e);
         } catch (SetaPDF_Core_Parser_CrossReferenceTable_Exception $e) {
-            throw new InvalidFileException();
+            throw new InvalidFileException($filePath, $e);
         }
     }
 
@@ -544,8 +561,9 @@ class PdfManager
      *
      * @throws FileMergeException
      * @throws FileNotFoundException
+     * @throws FileReadException
+     * @throws InvalidFileException
      * @throws InvalidMimeTypeException
-     * @throws SetaPDF_Core_Exception
      */
     public function merge($files, bool $renameFields = false): SetaPDF_Core_Document
     {
@@ -565,9 +583,10 @@ class PdfManager
                 // file is already loaded so we can just merge it it
                 $merger->addDocument($file);
             } else {
-                $this->validateFile($file);
-
-                $merger->addFile($this->fileSystem->path($file));
+                // load the document and add it to the merger
+                // we can't use `$merger->addFile()` in case the file isn't local (e.g. s3)
+                $document = $this->loadFile($file);
+                $merger->addDocument($document);
             }
         }
 
@@ -586,7 +605,7 @@ class PdfManager
      *
      * @param  SetaPDF_Core_Document  $document
      * @param  array  $fieldProperties
-     * @param  bool  $ignoreMissing  [optional]. Whether to ignore missing fields instead of throwing an error
+     * @param  bool  $ignoreMissing  [optional] Whether to ignore missing fields instead of throwing an error
      *
      * @return SetaPDF_Core_Document
      *
@@ -614,7 +633,7 @@ class PdfManager
             } catch (SetaPDF_FormFiller_Exception $e) {
                 // only throw the exception if we want to
                 if (!$ignoreMissing) {
-                    throw new InvalidFieldException($name);
+                    throw new InvalidFieldException($name, $e);
                 } else {
                     // don't throw error but skip to the next field
                     continue;

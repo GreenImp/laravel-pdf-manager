@@ -209,7 +209,7 @@ abstract class Stampable
     /**
      * Stamps the given document.
      *
-     * @param  SetaPDF_Core_Document  $document
+     * @param  SetaPDF_Core_Document  $document The document to stamp
      *
      * @return SetaPDF_Core_Document
      */
